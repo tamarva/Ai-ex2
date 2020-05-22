@@ -276,7 +276,9 @@ def better_evaluation_function(current_game_state):
     def monotonic_snake_eval():
         """
       this heuristic goal is to ensure that we don't have a large value between small values- which will make it more difficult to merge the
-      tiles and get higher score
+      tiles and get higher score. so we want to keep the values in monotonic way.
+      for each corner there are 2 possible "snakes" so i find the highest value on board and from there i calculate the 2 snakes sum and return
+      the maximum
       """
         highest_value_corner = find_max_val_corner()[0]
         if highest_value_corner == upper_right_corner:
@@ -293,9 +295,6 @@ def better_evaluation_function(current_game_state):
 
         return my_score
 
-    """
-        this method finds the maximum value of all edges
-        """
 
     def calculate_score_lower_right():
         def calculate_left_direc():
