@@ -156,7 +156,8 @@ class MinmaxAgent(MultiAgentSearchAgent):
 
         legal_actions = game_state.get_legal_actions(0)
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        scores = [minmax(successor, (2 * self.depth) -1, 1) for successor in successors]
+        scores = [minmax(successor, (2 * self.depth) - 1, 1) for successor in successors]
+        print(scores)
         best_score = max(scores)
         best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
         index_best_score = random.choice(best_indices)
@@ -206,7 +207,7 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
 
         legal_actions = game_state.get_legal_actions(0)
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        scores = [alphabeta(successor, 2 * self.depth - 1, -math.inf, math.inf, 1) for successor in successors]
+        scores = [alphabeta(successor, (2 * self.depth) - 1, -math.inf, math.inf, 1) for successor in successors]
         best_score = max(scores)
         best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
         index_best_score = random.choice(best_indices)
@@ -226,8 +227,9 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         The opponent should be modeled as choosing uniformly at random from their
         legal moves.
         """
-        """*** YOUR CODE HERE ***"""
         util.raiseNotDefined()
+        # same as minimax just to return in the min - the sum of the values of the children/ num of children
+
 
 
 def better_evaluation_function(current_game_state):
@@ -236,8 +238,208 @@ def better_evaluation_function(current_game_state):
 
     DESCRIPTION: <write something here so we know what you did>
     """
-    "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+
+    """
+    this evaluation prefers the states which have more free tiles - because if we have few free tiles with might end with low score
+    """
+    board = current_game_state.board
+    upper_left_corner = board[0][0], upper_right_corner = board[0][-1], lower_right_corner = board[-1][-1], lower_left_corner = board[-1][0]
+    corners = [upper_right_corner, upper_left_corner, lower_right_corner, lower_left_corner]
+    num_rows, num_cols = board.shape
+
+    def smoothness_eval():
+        """
+        this method tries to ensure we prefer states where its easier to fuse tiles and get higher scores
+        """
+        result = 0
+        for row_index in range(num_rows - 1):
+            for col_index in range(num_cols - 1):
+                if col_index == num_cols - 1:
+                    result += board[row_index, col_index]
+                else:
+                    result += abs(board[row_index, col_index] - board[row_index, col_index + 1])
+
+        for col_index in range(num_cols - 1):
+            for row_index in range(num_rows - 1):
+                if row_index == num_rows - 1:
+                    result += board[row_index, col_index]
+                else:
+                    result += abs(board[row_index, col_index] - board[row_index + 1, col_index])
+
+        return -result
+
+    def more_free_tiles_evaluation():
+        empty_tiles = current_game_state.get_empty_tiles()
+        return empty_tiles[0].size
+
+    def monotonic_snake_eval():
+        """
+      this heuristic goal is to ensure that we don't have a large value between small values- which will make it more difficult to merge the
+      tiles and get higher score
+      """
+        highest_value_corner = find_max_val_corner()[0]
+        if highest_value_corner == upper_right_corner:
+            my_score = calculate_score_upper_right()
+
+        if highest_value_corner == upper_left_corner:
+            my_score = calculate_score_upper_left()
+
+        if highest_value_corner == lower_left_corner:
+            my_score = calculate_score_lower_left()
+
+        if highest_value_corner == lower_right_corner:
+            my_score = calculate_score_lower_right()
+
+        return my_score
+
+    """
+        this method finds the maximum value of all edges
+        """
+
+    def calculate_score_lower_right():
+        def calculate_left_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = True
+            for row_index in range(num_rows - 1, -1, -1):
+                for col_index in range(num_cols):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        col_idx = num_cols - col_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        def calculate_up_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = True
+            for col_index in range(num_cols - 1, -1, -1):
+                for row_index in range(num_rows):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        row_idx = num_rows - row_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        return max(calculate_up_direc(), calculate_left_direc())
+
+    def calculate_score_upper_right():
+        def calculate_left_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = False
+            for row_index in range(num_rows):
+                for col_index in range(num_cols):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        col_idx = num_cols - col_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        def calculate_down_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = False
+            for col_index in range(num_cols - 1, -1, -1):
+                for row_index in range(num_rows):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        row_idx = num_rows - row_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        return max(calculate_down_direc(), calculate_left_direc())
+
+    def calculate_score_upper_left():
+        def calculate_right_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = False
+            for row_index in range(num_rows):
+                for col_index in range(num_cols):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        col_idx = num_cols - col_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        def calculate_down_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = False
+            for col_index in range(num_rows):
+                for row_index in range(num_cols):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        row_idx = num_rows - row_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        return max(calculate_down_direc(), calculate_right_direc())
+
+    def calculate_score_lower_left():
+        def calculate_right_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = False
+            for row_index in range(num_rows - 1, -1, -1):
+                for col_index in range(num_cols):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        col_idx = num_cols - col_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        def calculate_up_direc():
+            some_val = 0.25
+            weight = 1
+            sum_score = 0
+            to_turn_over = True
+            for col_index in range(num_cols):
+                for row_index in range(num_rows):
+                    row_idx = row_index
+                    col_idx = col_index
+                    if to_turn_over:
+                        row_idx = num_rows - row_idx - 1
+                    sum_score += board[row_idx][col_idx] * weight
+                    weight = weight * some_val
+                to_turn_over = not to_turn_over
+            return sum_score
+
+        return max(calculate_up_direc(), calculate_right_direc())
+
+    def find_max_val_corner():
+        return max([corner for corner in corners])
+
+    return 0.8 * monotonic_snake_eval() + 0.1 * more_free_tiles_evaluation() + 0.1 * smoothness_eval()
 
 
 # Abbreviation

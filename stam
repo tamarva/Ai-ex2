@@ -1,6 +1,12 @@
 import numpy as np
 class stam():
-   board = np.array([(1, 2), (3, 4)], dtype=np.int32)
-   print(board)
-   print(board[:, -1::-1])
+   # board = np.array([(1, 2,4), (10, 0, 5)], dtype=np.int32)
+   # print(board[-1][1]
+
+   num = 5
+   for i in range(5-1, -1, -1):
+      print (i)
+
+
+
 
