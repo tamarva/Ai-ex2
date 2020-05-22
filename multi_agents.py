@@ -209,6 +209,7 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
         scores = [alphabeta(successor, (2 * self.depth) - 1, -math.inf, math.inf, 1) for successor in successors]
         best_score = max(scores)
+        print(scores)
         best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
         index_best_score = random.choice(best_indices)
         best_action = legal_actions[index_best_score]
@@ -439,7 +440,7 @@ def better_evaluation_function(current_game_state):
     def find_max_val_corner():
         return max([corner for corner in corners])
 
-    return 0.8 * monotonic_snake_eval() + 0.1 * more_free_tiles_evaluation() + 0.1 * smoothness_eval()
+    return 0.6 * monotonic_snake_eval() + 0.2 * more_free_tiles_evaluation() + 0.2 * smoothness_eval()
 
 
 # Abbreviation
