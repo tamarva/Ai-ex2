@@ -1,10 +1,13 @@
 import random
+from enum import Enum, auto
+from typing import Callable
 
 import numpy as np
 import abc
 import util
 import math
 from game import Agent, Action
+from game_state import GameState
 
 
 class ReflexAgent(Agent):
@@ -40,16 +43,6 @@ class ReflexAgent(Agent):
         return legal_moves[chosen_index]
 
     def evaluation_function(self, current_game_state, action):
-        """
-        Design a better evaluation function here.
-
-        The evaluation function takes in the current and proposed successor
-        GameStates (GameState.py) and returns a number, where higher numbers are better.
-
-        """
-
-        # Useful information you can extract from a GameState (game_state.py)
-
         successor_game_state = current_game_state.generate_successor(action=action)
         board = successor_game_state.board
         max_tile = successor_game_state.max_tile
@@ -86,6 +79,17 @@ def score_evaluation_function(current_game_state):
     return current_game_state.score
 
 
+class SearchAlgorithm(Enum):
+    """The minimax algorithm."""
+    MINIMAX = auto()
+
+    """The alpha-beta algorithm."""
+    ALPHABETA = auto()
+
+    """The expectimax algorithm."""
+    EXPECTIMAX = auto()
+
+
 class MultiAgentSearchAgent(Agent):
     """
     This class provides some common elements to all of your
@@ -101,119 +105,122 @@ class MultiAgentSearchAgent(Agent):
     is another abstract class.
     """
 
+    """Represents the first player agent index."""
+    FIRST_PLAYER = 0
+
+    """Represents the second player agent index."""
+    SECOND_PLAYER = 1
+
+    evaluation_function: Callable[[GameState], int]
+    depth: int
+    algorithm: SearchAlgorithm
+
     def __init__(self, evaluation_function='scoreEvaluationFunction', depth=2):
         self.evaluation_function = util.lookup(evaluation_function, globals())
-        self.depth = depth
-
-    @abc.abstractmethod
-    def get_action(self, game_state):
-        return
-
-
-class MinmaxAgent(MultiAgentSearchAgent):
+        self.minimizing_function = None
+        self.depth = int(depth)
+        self.algorithm = None
 
     def get_action(self, game_state):
         """
-        Returns the minimax action from the current gameState using self.depth
-        and self.evaluationFunction.
-
-        Here are some method calls that might be useful when implementing minimax.
-
-        game_state.get_legal_actions(agent_index):
-            Returns a list of legal actions for an agent
-            agent_index=0 means our agent, the opponent is agent_index=1
-
-        Action.STOP:
-            The stop direction, which is always legal
-
-        game_state.generate_successor(agent_index, action):
-            Returns the successor game state after an agent takes an action
+        Implements the base entry for {@link get_action}. This method prepares the legal actions, gets the successors,
+        and calls the required algorithm, based on the strategy.
+        :param game_state: The current game state.
+        :return: The best move, in perspective for the current agent, to perform.
         """
 
-        def minmax(game_state, depth, agent_index):
-            if depth == 0:
-                return self.evaluation_function(game_state)
-
-            actions = game_state.get_legal_actions(agent_index)
-            if not actions:
-                return self.evaluation_function(game_state)
-
-            if agent_index == 0:
-                value = -math.inf
-                for action in actions:
-                    successor = game_state.generate_successor(0, action)
-                    val = minmax(successor, depth - 1, 1)
-                    value = max(value, val)
-                return value
-
-            else:
-                value = +math.inf
-                for action in actions:
-                    successor = game_state.generate_successor(1, action)
-                    val = minmax(successor, depth - 1, 0)
-                    value = min(value, val)
-                return value
+        # TODO Add edge cases handlers (depth < 2)
 
         legal_actions = game_state.get_legal_actions(0)
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        scores = [minmax(successor, (2 * self.depth) - 1, 1) for successor in successors]
-        print(scores)
-        best_score = max(scores)
-        best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
-        index_best_score = random.choice(best_indices)
-        best_action = legal_actions[index_best_score]
-        return best_action
+        scores = np.array([self._max_player(successor, 1, MultiAgentSearchAgent.SECOND_PLAYER)
+                           for successor in successors])
+        print(f'Scores: {scores} :: Selected Move: {legal_actions[scores.argmax(axis=0)]} (idx={scores.argmax(axis=0)})')
+        return legal_actions[scores.argmax(axis=0)]
+
+    def _evaluate(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
+        # If we're at a terminal node, evaluate it by using the heuristic value
+        if self.depth == depth:
+            return self.evaluation_function(game_state)
+
+        # If we're the first player, we should use the max-player method
+        if agent_index == MultiAgentSearchAgent.FIRST_PLAYER:
+            return self._max_player(game_state, depth + 1, agent_index, alpha, beta)
+        else:
+            return self._min_player(game_state, depth + 1, agent_index, alpha, beta)
+
+    def _max_player(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
+        """
+        Perform the maximizing player move.
+        :param game_state: The current game state.
+        :param depth: The depth of the search.
+        :param agent_index: The player agent index.
+        :param alpha: The alpha-value.
+        :param beta: The beta-value.
+        :return: The move score or best move.
+        """
+        # Iterate over the available actions
+        actions = game_state.get_legal_actions(agent_index)
+        if not actions:
+            return self.evaluation_function(game_state)
+
+        max_score = -np.inf
+        for action in actions:
+            successor = game_state.generate_successor(agent_index, action)
+            max_score = max(max_score, self._evaluate(successor, depth,  MultiAgentSearchAgent.SECOND_PLAYER,
+                                                      alpha, beta))
+
+            # Alpha-Beta cutoff
+            if self.algorithm == SearchAlgorithm.ALPHABETA:
+                if max_score > beta:
+                    break
+                alpha = max(alpha, max_score)
+
+        return max_score
+
+    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha, beta):
+        """
+        Perform the minimizing player move.
+        :param game_state: The current game state.
+        :param depth: The depth of the search.
+        :param agent_index: The player agent index.
+        :param alpha: The alpha-value.
+        :param beta: The beta-value.
+        :return: The move score or best move.
+        """
+        # Iterate over the available actions
+        actions = game_state.get_legal_actions(agent_index)
+        if not actions:
+            return self.evaluation_function(game_state)
+
+        min_score = np.inf
+        for action in actions:
+            successor = game_state.generate_successor(agent_index, action)
+            min_score = min(min_score, self._evaluate(successor, depth,  MultiAgentSearchAgent.FIRST_PLAYER,
+                                                      alpha, beta))
+
+            # Alpha-Beta cutoff
+            if self.algorithm == SearchAlgorithm.ALPHABETA:
+                if min_score < alpha:
+                    break
+                beta = min(beta, min_score)
+
+        return min_score
+
+
+class MinmaxAgent(MultiAgentSearchAgent):
+    def __init__(self, evaluation_function='scoreEvaluationFunction', depth=2):
+        super().__init__(evaluation_function, depth)
+        self.algorithm = SearchAlgorithm.MINIMAX
 
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
     Your minimax agent with alpha-beta pruning (question 3)
     """
-
-    def get_action(self, game_state):
-        """
-        Returns the minimax action using self.depth and self.evaluationFunction
-        """
-
-        def alphabeta(game_state, depth, alpha, beta, agent_index):
-            if depth == 0:
-                return self.evaluation_function(game_state)
-
-            actions = game_state.get_legal_actions(agent_index)
-            if not actions:
-                return self.evaluation_function(game_state)
-
-            if agent_index == 0:
-                value = -math.inf
-                for action in actions:
-                    successor = game_state.generate_successor(agent_index, action)
-                    val = alphabeta(successor, depth - 1, alpha, beta, 1)
-                    value = max(value, val)
-                    alpha = max(alpha, value)
-                    if alpha >= beta:
-                        break
-                return value
-
-            else:
-                value = +math.inf
-                for action in actions:
-                    successor = game_state.generate_successor(agent_index, action)
-                    val = alphabeta(successor, depth - 1, alpha, beta, 0)
-                    value = min(value, val)
-                    beta = min(beta, value)
-                    if alpha >= beta:
-                        break
-                return value
-
-        legal_actions = game_state.get_legal_actions(0)
-        successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        scores = [alphabeta(successor, (2 * self.depth) - 1, -math.inf, math.inf, 1) for successor in successors]
-        best_score = max(scores)
-        print(scores)
-        best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
-        index_best_score = random.choice(best_indices)
-        best_action = legal_actions[index_best_score]
-        return best_action
+    def __init__(self, evaluation_function='scoreEvaluationFunction', depth=2):
+        super().__init__(evaluation_function, depth)
+        self.algorithm = SearchAlgorithm.ALPHABETA
 
 
 class ExpectimaxAgent(MultiAgentSearchAgent):
@@ -221,16 +228,34 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
     Your expectimax agent (question 4)
     """
 
-    def get_action(self, game_state):
-        """
-        Returns the expectimax action using self.depth and self.evaluationFunction
+    def __init__(self, evaluation_function='scoreEvaluationFunction', depth=2):
+        super().__init__(evaluation_function, depth)
+        self.algorithm = SearchAlgorithm.EXPECTIMAX
 
-        The opponent should be modeled as choosing uniformly at random from their
-        legal moves.
+    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
         """
-        util.raiseNotDefined()
-        # same as minimax just to return in the min - the sum of the values of the children/ num of children
+        Perform the minimizing player move in the expectimax algorithm.
+        :param game_state: The current game state.
+        :param depth: The depth of the search.
+        :param agent_index: The player agent index.
+        :param alpha: The alpha-value.
+        :param beta: The beta-value.
+        :return: The move score or best move.
+        """
+        # Iterate over the available actions
+        actions = game_state.get_legal_actions(agent_index)
+        if not actions:
+            return self.evaluation_function(game_state)
 
+        next_player = MultiAgentSearchAgent.SECOND_PLAYER if agent_index == MultiAgentSearchAgent.FIRST_PLAYER \
+            else MultiAgentSearchAgent.FIRST_PLAYER
+
+        evaluation = 0
+        for action in actions:
+            successor = game_state.generate_successor(agent_index, action)
+            evaluation += self._evaluate(successor, depth, next_player, alpha, beta)
+
+        return evaluation / float(len(actions))  # Uniform distribution
 
 
 def better_evaluation_function(current_game_state):
@@ -244,7 +269,8 @@ def better_evaluation_function(current_game_state):
     this evaluation prefers the states which have more free tiles - because if we have few free tiles with might end with low score
     """
     board = current_game_state.board
-    upper_left_corner = board[0][0], upper_right_corner = board[0][-1], lower_right_corner = board[-1][-1], lower_left_corner = board[-1][0]
+    upper_left_corner, upper_right_corner, lower_right_corner, lower_left_corner = \
+        board[0, 0], board[0, -1], board[-1, -1], board[-1, 0]
     corners = [upper_right_corner, upper_left_corner, lower_right_corner, lower_left_corner]
     num_rows, num_cols = board.shape
 
@@ -280,7 +306,7 @@ def better_evaluation_function(current_game_state):
       for each corner there are 2 possible "snakes" so i find the highest value on board and from there i calculate the 2 snakes sum and return
       the maximum
       """
-        highest_value_corner = find_max_val_corner()[0]
+        highest_value_corner = find_max_val_corner()
         if highest_value_corner == upper_right_corner:
             my_score = calculate_score_upper_right()
 
@@ -294,7 +320,6 @@ def better_evaluation_function(current_game_state):
             my_score = calculate_score_lower_right()
 
         return my_score
-
 
     def calculate_score_lower_right():
         def calculate_left_direc():
