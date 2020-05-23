@@ -1,4 +1,5 @@
 import random
+import sys
 from enum import Enum, auto
 from typing import Callable
 
@@ -130,26 +131,27 @@ class MultiAgentSearchAgent(Agent):
         """
 
         # TODO Add edge cases handlers (depth < 2)
-
+        #
         legal_actions = game_state.get_legal_actions(0)
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        scores = np.array([self._max_player(successor, 1, MultiAgentSearchAgent.SECOND_PLAYER)
+        scores = np.array([self._min_player(successor, (self.depth * 2) - 1, MultiAgentSearchAgent.SECOND_PLAYER)
                            for successor in successors])
-        print(f'Scores: {scores} :: Selected Move: {legal_actions[scores.argmax(axis=0)]} (idx={scores.argmax(axis=0)})')
+        print(
+            f'Max Score : {scores.max()} ; Scores: {scores} :: Selected Move: {legal_actions[scores.argmax(axis=0)]} (idx={scores.argmax(axis=0)})')
         return legal_actions[scores.argmax(axis=0)]
 
-    def _evaluate(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
-        # If we're at a terminal node, evaluate it by using the heuristic value
-        if self.depth == depth:
-            return self.evaluation_function(game_state)
+        # legal_actions = game_state.get_legal_actions(0)
+        # successors = [game_state.generate_successor(0, action) for action in legal_actions]
+        # scores = [self._min_player(successor, (2 * self.depth) - 1, 1) for successor in successors]
+        # print(scores)
+        # print(game_state.board)
+        # best_score = max(scores)
+        # best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
+        # index_best_score = random.choice(best_indices)
+        # best_action = legal_actions[index_best_score]
+        # return best_action
 
-        # If we're the first player, we should use the max-player method
-        if agent_index == MultiAgentSearchAgent.FIRST_PLAYER:
-            return self._max_player(game_state, depth + 1, agent_index, alpha, beta)
-        else:
-            return self._min_player(game_state, depth + 1, agent_index, alpha, beta)
-
-    def _max_player(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
+    def _max_player(self, game_state: GameState, depth: int, agent_index: int, alpha=float('-inf'), beta=float('inf')):
         """
         Perform the maximizing player move.
         :param game_state: The current game state.
@@ -160,15 +162,20 @@ class MultiAgentSearchAgent(Agent):
         :return: The move score or best move.
         """
         # Iterate over the available actions
+        if depth == 0:
+            return self.evaluation_function(game_state)
+
         actions = game_state.get_legal_actions(agent_index)
         if not actions:
             return self.evaluation_function(game_state)
 
-        max_score = -np.inf
+        next_player = MultiAgentSearchAgent.SECOND_PLAYER if agent_index == MultiAgentSearchAgent.FIRST_PLAYER \
+            else MultiAgentSearchAgent.FIRST_PLAYER
+        max_score = -math.inf
         for action in actions:
             successor = game_state.generate_successor(agent_index, action)
-            max_score = max(max_score, self._evaluate(successor, depth,  MultiAgentSearchAgent.SECOND_PLAYER,
-                                                      alpha, beta))
+            max_score = max(max_score,
+                            self._min_player(successor, depth - 1, next_player, alpha, beta))
 
             # Alpha-Beta cutoff
             if self.algorithm == SearchAlgorithm.ALPHABETA:
@@ -178,7 +185,7 @@ class MultiAgentSearchAgent(Agent):
 
         return max_score
 
-    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha, beta):
+    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha=float('-inf'), beta=float('inf')):
         """
         Perform the minimizing player move.
         :param game_state: The current game state.
@@ -189,15 +196,19 @@ class MultiAgentSearchAgent(Agent):
         :return: The move score or best move.
         """
         # Iterate over the available actions
+        if depth == 0:
+            return self.evaluation_function(game_state)
+
         actions = game_state.get_legal_actions(agent_index)
         if not actions:
             return self.evaluation_function(game_state)
 
-        min_score = np.inf
+        next_player = MultiAgentSearchAgent.SECOND_PLAYER if agent_index == MultiAgentSearchAgent.FIRST_PLAYER \
+            else MultiAgentSearchAgent.FIRST_PLAYER
+        min_score = +math.inf
         for action in actions:
             successor = game_state.generate_successor(agent_index, action)
-            min_score = min(min_score, self._evaluate(successor, depth,  MultiAgentSearchAgent.FIRST_PLAYER,
-                                                      alpha, beta))
+            min_score = min(min_score, self._max_player(successor, depth - 1, next_player, alpha, beta))
 
             # Alpha-Beta cutoff
             if self.algorithm == SearchAlgorithm.ALPHABETA:
@@ -218,6 +229,7 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
     """
     Your minimax agent with alpha-beta pruning (question 3)
     """
+
     def __init__(self, evaluation_function='scoreEvaluationFunction', depth=2):
         super().__init__(evaluation_function, depth)
         self.algorithm = SearchAlgorithm.ALPHABETA
@@ -232,9 +244,9 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         super().__init__(evaluation_function, depth)
         self.algorithm = SearchAlgorithm.EXPECTIMAX
 
-    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha=-np.inf, beta=+np.inf):
+    def _min_player(self, game_state: GameState, depth: int, agent_index: int, alpha=float('-inf'), beta=float('inf')):
         """
-        Perform the minimizing player move in the expectimax algorithm.
+        Perform the minimizing player move.
         :param game_state: The current game state.
         :param depth: The depth of the search.
         :param agent_index: The player agent index.
@@ -243,17 +255,19 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         :return: The move score or best move.
         """
         # Iterate over the available actions
+        if depth == 0:
+            return self.evaluation_function(game_state)
+
         actions = game_state.get_legal_actions(agent_index)
         if not actions:
             return self.evaluation_function(game_state)
 
         next_player = MultiAgentSearchAgent.SECOND_PLAYER if agent_index == MultiAgentSearchAgent.FIRST_PLAYER \
             else MultiAgentSearchAgent.FIRST_PLAYER
-
         evaluation = 0
         for action in actions:
             successor = game_state.generate_successor(agent_index, action)
-            evaluation += self._evaluate(successor, depth, next_player, alpha, beta)
+            evaluation += self._max_player(successor, depth - 1, next_player, alpha, beta)
 
         return evaluation / float(len(actions))  # Uniform distribution
 
