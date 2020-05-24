@@ -1,7 +1,7 @@
 import random
 import sys
 from enum import Enum, auto
-from typing import Callable
+from typing import Callable, Tuple
 
 import numpy as np
 import abc
@@ -130,26 +130,24 @@ class MultiAgentSearchAgent(Agent):
         :return: The best move, in perspective for the current agent, to perform.
         """
 
-        # TODO Add edge cases handlers (depth < 2)
-        #
+        # Did we got a valid depth value
+        if self.depth < 1:
+            return Action.STOP
+
+        # Fetch the possible actions
         legal_actions = game_state.get_legal_actions(0)
+        if not legal_actions:
+            return Action.STOP
+
+        # Generate the successors for each legal action
         successors = [game_state.generate_successor(0, action) for action in legal_actions]
+
+        # Calculate the score for each legal action
         scores = np.array([self._min_player(successor, (self.depth * 2) - 1, MultiAgentSearchAgent.SECOND_PLAYER)
                            for successor in successors])
         print(
             f'Max Score : {scores.max()} ; Scores: {scores} :: Selected Move: {legal_actions[scores.argmax(axis=0)]} (idx={scores.argmax(axis=0)})')
         return legal_actions[scores.argmax(axis=0)]
-
-        # legal_actions = game_state.get_legal_actions(0)
-        # successors = [game_state.generate_successor(0, action) for action in legal_actions]
-        # scores = [self._min_player(successor, (2 * self.depth) - 1, 1) for successor in successors]
-        # print(scores)
-        # print(game_state.board)
-        # best_score = max(scores)
-        # best_indices = [index for index in range(len(scores)) if scores[index] == best_score]
-        # index_best_score = random.choice(best_indices)
-        # best_action = legal_actions[index_best_score]
-        # return best_action
 
     def _max_player(self, game_state: GameState, depth: int, agent_index: int, alpha=float('-inf'), beta=float('inf')):
         """
@@ -272,6 +270,22 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         return evaluation / float(len(actions))  # Uniform distribution
 
 
+################################################################
+# Heuristic
+################################################################
+
+# Configurations
+WEIGHTS = {
+    "smoothness": 0.1,
+    "monotonicity": 1.0,
+    "empty": 2.7,
+    "max": 1.0
+}
+
+# Globals (should've been static variables, but we don't have a class :(... )
+# transposition_table = {}  # TODO: Do we need to prune the transposition table sometimes? it get very big (1M+ entries)
+
+
 def better_evaluation_function(current_game_state):
     """
     Your extreme 2048 evaluation function (question 5).
@@ -279,206 +293,163 @@ def better_evaluation_function(current_game_state):
     DESCRIPTION: <write something here so we know what you did>
     """
 
-    """
-    this evaluation prefers the states which have more free tiles - because if we have few free tiles with might end with low score
-    """
+    # Setup
     board = current_game_state.board
-    upper_left_corner, upper_right_corner, lower_right_corner, lower_left_corner = \
-        board[0, 0], board[0, -1], board[-1, -1], board[-1, 0]
-    corners = [upper_right_corner, upper_left_corner, lower_right_corner, lower_left_corner]
     num_rows, num_cols = board.shape
 
-    def smoothness_eval():
+    def in_board_bounds(row: int, col: int):
         """
-        this method tries to ensure we prefer states where its easier to fuse tiles and get higher scores
+        Return true if the given row and column are in the board bounds.
+        :param row: The row to check.
+        :param col: The column to check.
+        :return: True if the given row and column are in the board bounds and false otherwise.
         """
-        result = 0
-        for row_index in range(num_rows - 1):
-            for col_index in range(num_cols - 1):
-                if col_index == num_cols - 1:
-                    result += board[row_index, col_index]
+        return 0 <= row <= num_rows - 1 and 0 <= col <= num_cols - 1
+
+    def get_farhest_cell(row: int, col: int, direction: Tuple[int, int]):
+        """
+        Search for the first cell that is actually not occupied.
+
+        Example:
+        [[2 0 2 4]
+         [0 2 8 4]
+         [0 0 0 0]
+         [0 0 0 2]]
+         Yields for the direction vector (0, 1) -
+         - point (0, 0) (value 2) => 2.
+         - point (1, 1) (value 2) => 8.
+         - point (1, 2) (value 8) => 4.
+         - point (0, 3) (value 4) => 0. etc.
+
+        :param row: The row to start from.
+        :param col: The column to start from.
+        :param direction: The direction to search with.
+        :return: The cell value.
+        """
+        cell_value = 0
+        while True:
+            row += direction[0]
+            col += direction[1]
+            if not in_board_bounds(row, col):
+                break
+
+            cell_value = board[row, col]
+
+            if cell_value != 0:
+                break
+
+        return cell_value
+
+    def count_available_cells():
+        """
+        Counts the number of available cells.
+        :return: The number of available cells.
+        """
+        return np.count_nonzero(board == 0)  # Empty cells marked with zero
+
+    def evaluate_board_smoothness():
+        """
+        Evaluate the board smoothness.
+        We sum the pairwise difference between neighboring tile (in log space, so it represents the number of actions
+        required to happen before they can fuse).
+        :return: The board smoothness value.
+        """
+        smoothness = 0
+
+        for row in range(num_rows):
+            for col in range(num_cols):
+                # Is this an empty location?
+                if board[row, col] == 0:
+                    continue
+
+                # Evaluate the value, by using a log to take into account the turns measurement.
+                value = math.log2(board[row, col])
+
+                # Measure the distances for right and bottom
+                # (Note that we actually don't need to take up and left as it will be transposed)
+                for direction in ((0, 1), (1, 0)):
+                    farest_cell = get_farhest_cell(row, col, direction)
+
+                    if farest_cell != 0:  # That's not an empty cell
+                        smoothness -= abs(value - math.log2(farest_cell))
+
+            return smoothness
+
+    def evaluate_board_monotonicity():
+        """
+        Evaluate the board monotonicity. That is, evaluate if the cells are strictly increasing or decreasing.
+        :return: The board monotonicity.
+        """
+        counters = [0, 0, 0, 0]
+
+        for row in range(num_rows):
+            current_index = 0
+            next_index = current_index + 1
+            while next_index < num_cols:
+                # Find the closest cell that actually has a value
+                while next_index < num_cols and board[row, next_index] == 0:
+                    next_index += 1
+
+                # Did we found something?
+                if next_index >= num_rows:
+                    next_index -= 1
+
+                current_value = math.log2(board[row, current_index]) if board[row, current_index] != 0 else 0
+                next_value = math.log2(board[row, next_index]) if board[row, next_index] != 0 else 0
+
+                if current_value > next_value:
+                    counters[0] += next_value - current_value
                 else:
-                    result += abs(board[row_index, col_index] - board[row_index, col_index + 1])
+                    counters[1] += current_value - next_value
 
-        for col_index in range(num_cols - 1):
-            for row_index in range(num_rows - 1):
-                if row_index == num_rows - 1:
-                    result += board[row_index, col_index]
+                current_index = next_index
+                next_index += 1
+
+        for col in range(num_cols):
+            current_index = 0
+            next_index = current_index + 1
+            while next_index < num_rows:
+                # Find the closest cell that actually has a value
+                while next_index < num_rows and board[next_index, col] == 0:
+                    next_index += 1
+
+                # Did we found something?
+                if next_index >= num_rows:
+                    next_index -= 1
+
+                current_value = math.log2(board[current_index, col]) if board[current_index, col] != 0 else 0
+                next_value = math.log2(board[next_index, col]) if board[next_index, col] != 0 else 0
+
+                if current_value > next_value:
+                    counters[2] += next_value - current_value
                 else:
-                    result += abs(board[row_index, col_index] - board[row_index + 1, col_index])
+                    counters[3] += current_value - next_value
 
-        return -result
+                current_index = next_index
+                next_index += 1
 
-    def more_free_tiles_evaluation():
-        empty_tiles = current_game_state.get_empty_tiles()
-        return empty_tiles[0].size
+        return max(counters[0], counters[1]) + max(counters[2], counters[3])
 
-    def monotonic_snake_eval():
-        """
-      this heuristic goal is to ensure that we don't have a large value between small values- which will make it more difficult to merge the
-      tiles and get higher score. so we want to keep the values in monotonic way.
-      for each corner there are 2 possible "snakes" so i find the highest value on board and from there i calculate the 2 snakes sum and return
-      the maximum
-      """
-        highest_value_corner = find_max_val_corner()
-        if highest_value_corner == upper_right_corner:
-            my_score = calculate_score_upper_right()
+    # board_key = str(board)  # We can't use numpy arrays as dictionary keys, but we can translate them into strings! :)
+    # if board_key in transposition_table:
+    #     transposition_table[board_key]['hits'] += 1
+    #     return transposition_table[board_key]['score']
 
-        if highest_value_corner == upper_left_corner:
-            my_score = calculate_score_upper_left()
+    # Prepare
+    available_cells_count = count_available_cells()
+    available_cells_count = math.log(available_cells_count) if available_cells_count > 0 else 0
+    board_max_value = np.max(board)
+    board_max_value = board_max_value * WEIGHTS['max'] if board_max_value > 0 else 0
 
-        if highest_value_corner == lower_left_corner:
-            my_score = calculate_score_lower_left()
+    # Evaluate
+    evaluation = evaluate_board_smoothness() * WEIGHTS['smoothness'] \
+                 + evaluate_board_monotonicity() * WEIGHTS['monotonicity'] \
+                 + available_cells_count * WEIGHTS['empty'] \
+                 + board_max_value
 
-        if highest_value_corner == lower_right_corner:
-            my_score = calculate_score_lower_right()
-
-        return my_score
-
-    def calculate_score_lower_right():
-        def calculate_left_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = True
-            for row_index in range(num_rows - 1, -1, -1):
-                for col_index in range(num_cols):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        col_idx = num_cols - col_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        def calculate_up_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = True
-            for col_index in range(num_cols - 1, -1, -1):
-                for row_index in range(num_rows):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        row_idx = num_rows - row_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        return max(calculate_up_direc(), calculate_left_direc())
-
-    def calculate_score_upper_right():
-        def calculate_left_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = False
-            for row_index in range(num_rows):
-                for col_index in range(num_cols):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        col_idx = num_cols - col_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        def calculate_down_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = False
-            for col_index in range(num_cols - 1, -1, -1):
-                for row_index in range(num_rows):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        row_idx = num_rows - row_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        return max(calculate_down_direc(), calculate_left_direc())
-
-    def calculate_score_upper_left():
-        def calculate_right_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = False
-            for row_index in range(num_rows):
-                for col_index in range(num_cols):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        col_idx = num_cols - col_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        def calculate_down_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = False
-            for col_index in range(num_rows):
-                for row_index in range(num_cols):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        row_idx = num_rows - row_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        return max(calculate_down_direc(), calculate_right_direc())
-
-    def calculate_score_lower_left():
-        def calculate_right_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = False
-            for row_index in range(num_rows - 1, -1, -1):
-                for col_index in range(num_cols):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        col_idx = num_cols - col_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        def calculate_up_direc():
-            some_val = 0.25
-            weight = 1
-            sum_score = 0
-            to_turn_over = True
-            for col_index in range(num_cols):
-                for row_index in range(num_rows):
-                    row_idx = row_index
-                    col_idx = col_index
-                    if to_turn_over:
-                        row_idx = num_rows - row_idx - 1
-                    sum_score += board[row_idx][col_idx] * weight
-                    weight = weight * some_val
-                to_turn_over = not to_turn_over
-            return sum_score
-
-        return max(calculate_up_direc(), calculate_right_direc())
-
-    def find_max_val_corner():
-        return max([corner for corner in corners])
-
-    return 0.6 * monotonic_snake_eval() + 0.2 * more_free_tiles_evaluation() + 0.2 * smoothness_eval()
+    # Save in the transposition table
+    # transposition_table[board_key] = {'hits': 0, 'score': evaluation}
+    return evaluation
 
 
 # Abbreviation
